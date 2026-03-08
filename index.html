@@ -540,7 +540,7 @@ body {
     </div>
 
     <label class="lbl">URL del Apps Script (Web App)</label>
-    <input class="inp" id="setup-url" type="url" placeholder="https://script.google.com/macros/s/...">
+    <input class="inp" id="setup-url" type="url" placeholder="https://script.google.com/macros/s/..." value="https://script.google.com/macros/s/AKfycbyjAVQwRsCxxFDZ9hQXUt0-yVWhYVwjoyr-7qzTaMBAIckPwnXFwdvHSoUzFzTB8Aw_/exec">
     <button class="btn-orange" onclick="conectar()">🔗 Conectar con Google Sheets</button>
     <button class="btn-ghost" onclick="modoDemo()">▶ Probar en modo demo</button>
   </div>
@@ -737,7 +737,7 @@ body {
     <div class="modal-handle"></div>
     <div class="modal-title">🔗 Conexión</div>
     <div class="modal-sub">URL del Apps Script de Google</div>
-    <div class="fg"><label class="fl">URL Web App</label><input class="fi" id="m-conn-url" type="url" placeholder="https://script.google.com/macros/s/..." style="font-size:12px;text-align:left;font-family:var(--mono)"></div>
+    <div class="fg"><label class="fl">URL Web App</label><input class="fi" id="m-conn-url" type="url" placeholder="https://script.google.com/macros/s/..." value="https://script.google.com/macros/s/AKfycbyjAVQwRsCxxFDZ9hQXUt0-yVWhYVwjoyr-7qzTaMBAIckPwnXFwdvHSoUzFzTB8Aw_/exec" style="font-size:12px;text-align:left;font-family:var(--mono)"></div>
     <button class="btn-orange" onclick="saveConexion()">💾 Guardar</button>
     <button class="btn-ghost" onclick="closeModal('m-conexion')" style="margin-top:8px">Cancelar</button>
   </div>
@@ -853,7 +853,9 @@ async function syncAll() {
   const txt = document.getElementById('sync-txt');
   pill.className = 'sync-pill'; txt.textContent = '⏳';
   try {
-    const res = await fetch(S.scriptUrl + '?action=getData');
+    const res = await fetch(S.scriptUrl + '?action=getData', {
+      redirect: 'follow'
+    });
     const data = await res.json();
     if (data.aceites) S.aceites = data.aceites;
     if (data.historial) S.historial = data.historial;
@@ -874,7 +876,9 @@ async function pushData(type, payload) {
   try {
     await fetch(S.scriptUrl, {
       method: 'POST',
-      body: JSON.stringify({ action: type, ...payload })
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: type, ...payload }),
+      redirect: 'follow'
     });
   } catch(e) { toast('Error al guardar en Sheets','err'); }
 }
@@ -1441,20 +1445,32 @@ const SCRIPT_CODE = `// ══════════════════�
 // ═══════════════════════════════════════════
 
 function doGet(e) {
+  if (!e || !e.parameter) {
+    return json({ error: 'Ejecuta desde la URL publicada.' });
+  }
   const action = e.parameter.action;
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-
   if (action === 'getData') {
     const aceites = getSheetData(ss, 'Stock');
     const historial = getSheetData(ss, 'Historial');
     const cierres = getSheetData(ss, 'Cierres');
-    return json({ aceites, historial, cierres });
+    const vaciados = getSheetData(ss, 'Vaciados');
+    return json({ aceites, historial, cierres, vaciados });
   }
   return json({ error: 'action not found' });
 }
 
 function doPost(e) {
-  const body = JSON.parse(e.postData.contents);
+  if (!e || !e.postData) return json({ error: 'Sin datos.' });
+  
+  // Acepta tanto application/json como text/plain (fix CORS)
+  let body;
+  try {
+    body = JSON.parse(e.postData.contents);
+  } catch(err) {
+    return json({ error: 'JSON inválido: ' + err.message });
+  }
+  
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const action = body.action;
 
@@ -1466,6 +1482,8 @@ function doPost(e) {
     writeSheet(ss, 'Historial', body.historial);
   } else if (action === 'addCierre') {
     appendRow(ss, 'Cierres', body.cierre);
+  } else if (action === 'addVaciado') {
+    appendRow(ss, 'Vaciados', body.vaciado);
   }
   return json({ ok: true });
 }
@@ -1522,15 +1540,17 @@ function copyScript() {
 //  INIT
 // ══════════════════════════════════════════════
 window.addEventListener('load', () => {
-  const url = localStorage.getItem('primax_url');
+  // URL fija del servidor — no requiere configuración
+  const FIXED_URL = 'https://script.google.com/macros/s/AKfycbyjAVQwRsCxxFDZ9hQXUt0-yVWhYVwjoyr-7qzTaMBAIckPwnXFwdvHSoUzFzTB8Aw_/exec';
+  const url = FIXED_URL || localStorage.getItem('primax_url');
   if (url) {
-    // Auto-conectar sin pasar por setup
     S.scriptUrl = url;
     S.demo = false;
     S.aceites = [];
     S.historial = [];
     S.cierres = [];
     S.vaciados = [];
+    localStorage.setItem('primax_url', url);
     iniciarApp();
     syncAll();
   }
