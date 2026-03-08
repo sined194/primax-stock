@@ -809,7 +809,10 @@ const S = {
 };
 
 
-function hoy() { return new Date().toLocaleDateString('es-PE'); }
+function hoy() {
+  const d = new Date();
+  return d.getDate().toString().padStart(2,'0') + '/' + (d.getMonth()+1).toString().padStart(2,'0') + '/' + d.getFullYear();
+}
 function ahora() { return new Date().toLocaleTimeString('es-PE',{hour:'2-digit',minute:'2-digit'}); }
 function fmtMoney(n) { return 'S/ ' + Number(n).toFixed(2); }
 
@@ -847,6 +850,35 @@ function ayer() { const d=new Date(); d.setDate(d.getDate()-1); return d.toLocal
 // ══════════════════════════════════════════════
 //  GOOGLE APPS SCRIPT SYNC
 // ══════════════════════════════════════════════
+function normalizeFecha(f) {
+  if (!f) return '';
+  // Already in dd/mm/yyyy format
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(String(f))) return String(f);
+  // ISO format: 2026-03-08T05:00:00.000Z
+  const d = new Date(f);
+  if (!isNaN(d)) return d.getDate().toString().padStart(2,'0') + '/' + (d.getMonth()+1).toString().padStart(2,'0') + '/' + d.getFullYear();
+  return String(f);
+}
+
+function parseProductos(p) {
+  if (!p) return [];
+  if (Array.isArray(p)) return p;
+  // Comes as string from Sheets like "{nombre=X, qty=1, monto=4}"
+  try { return JSON.parse(p); } catch(e) {}
+  // Try to parse the {nombre=X, qty=Y, monto=Z} format
+  try {
+    const str = String(p).replace(/^\[|\]$/g,'');
+    return str.split('}, {').map(s => {
+      const obj = {};
+      s.replace(/[{}]/g,'').split(', ').forEach(pair => {
+        const [k,v] = pair.split('=');
+        if (k && v) obj[k.trim()] = isNaN(v) ? v.trim() : Number(v);
+      });
+      return obj;
+    }).filter(o => o.nombre);
+  } catch(e) { return []; }
+}
+
 async function syncAll() {
   if (S.demo) { toast('Modo demo: sin conexión','info'); return; }
   const pill = document.getElementById('sync-pill');
@@ -857,10 +889,44 @@ async function syncAll() {
       redirect: 'follow'
     });
     const data = await res.json();
-    if (data.aceites) S.aceites = data.aceites;
-    if (data.historial) S.historial = data.historial;
-    if (data.cierres) S.cierres = data.cierres;
-    if (data.vaciados) S.vaciados = data.vaciados;
+
+    // Sanitize data from Sheets — fix types
+    if (data.aceites) S.aceites = data.aceites.map(a => ({
+      ...a,
+      id: Number(a.id),
+      qty: Number(a.qty) || 0,
+      minimo: Number(a.minimo) || 0,
+      precio: Number(a.precio) || 0
+    }));
+
+    if (data.historial) S.historial = data.historial.map(h => ({
+      ...h,
+      id: Number(h.id),
+      qty: Number(h.qty) || 0,
+      precio: Number(h.precio) || 0,
+      monto: Number(h.monto) || 0,
+      // Normalize date format
+      fecha: normalizeFecha(h.fecha)
+    }));
+
+    if (data.cierres) S.cierres = data.cierres.map(cr => ({
+      ...cr,
+      id: Number(cr.id),
+      saldoAnterior: Number(cr.saldoAnterior) || 0,
+      ventasDia: Number(cr.ventasDia) || 0,
+      totalCaja: Number(cr.totalCaja) || 0,
+      montoFisico: Number(cr.montoFisico) || 0,
+      fecha: normalizeFecha(cr.fecha),
+      // productos comes as string from Sheets, try to parse
+      productos: parseProductos(cr.productos)
+    }));
+
+    if (data.vaciados) S.vaciados = (data.vaciados || []).map(v => ({
+      ...v,
+      id: Number(v.id),
+      monto: Number(v.monto) || 0,
+      fecha: normalizeFecha(v.fecha)
+    }));
     pill.className = 'sync-pill ok'; txt.textContent = '✓ Sync';
     renderAll();
     setTimeout(()=>{ pill.className='sync-pill'; txt.textContent='Sync'; }, 3000);
@@ -1272,7 +1338,7 @@ function cerrarDia() {
     id: Date.now(), fecha: h,
     saldoAnterior, ventasDia: totalVentasHoy,
     totalCaja, montoFisico, nota,
-    productos: Object.values(productMap)
+    productos: JSON.stringify(Object.values(productMap))
   };
   S.cierres.push(cierre);
   renderAll();
