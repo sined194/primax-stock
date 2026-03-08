@@ -540,7 +540,7 @@ body {
     </div>
 
     <label class="lbl">URL del Apps Script (Web App)</label>
-    <input class="inp" id="setup-url" type="url" placeholder="https://script.google.com/macros/s/..." value="https://script.google.com/macros/s/AKfycbyjAVQwRsCxxFDZ9hQXUt0-yVWhYVwjoyr-7qzTaMBAIckPwnXFwdvHSoUzFzTB8Aw_/exec">
+    <input class="inp" id="setup-url" type="url" placeholder="https://script.google.com/macros/s/..." value="https://script.google.com/macros/s/AKfycbwLhYSxQFasUJSzJ1OTtv2KpldQnz9wYniThKdU8h8c3YvLPpTWCQJJDgTDgziUZtMq/exec">
     <button class="btn-orange" onclick="conectar()">🔗 Conectar con Google Sheets</button>
     <button class="btn-ghost" onclick="modoDemo()">▶ Probar en modo demo</button>
   </div>
@@ -737,7 +737,7 @@ body {
     <div class="modal-handle"></div>
     <div class="modal-title">🔗 Conexión</div>
     <div class="modal-sub">URL del Apps Script de Google</div>
-    <div class="fg"><label class="fl">URL Web App</label><input class="fi" id="m-conn-url" type="url" placeholder="https://script.google.com/macros/s/..." value="https://script.google.com/macros/s/AKfycbyjAVQwRsCxxFDZ9hQXUt0-yVWhYVwjoyr-7qzTaMBAIckPwnXFwdvHSoUzFzTB8Aw_/exec" style="font-size:12px;text-align:left;font-family:var(--mono)"></div>
+    <div class="fg"><label class="fl">URL Web App</label><input class="fi" id="m-conn-url" type="url" placeholder="https://script.google.com/macros/s/..." value="https://script.google.com/macros/s/AKfycbwLhYSxQFasUJSzJ1OTtv2KpldQnz9wYniThKdU8h8c3YvLPpTWCQJJDgTDgziUZtMq/exec" style="font-size:12px;text-align:left;font-family:var(--mono)"></div>
     <button class="btn-orange" onclick="saveConexion()">💾 Guardar</button>
     <button class="btn-ghost" onclick="closeModal('m-conexion')" style="margin-top:8px">Cancelar</button>
   </div>
@@ -874,13 +874,9 @@ async function syncAll() {
 async function pushData(type, payload) {
   if (S.demo) return;
   try {
-    await fetch(S.scriptUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action: type, ...payload }),
-      redirect: 'follow'
-    });
-  } catch(e) { toast('Error al guardar en Sheets','err'); }
+    const blob = new Blob([JSON.stringify({ action: type, ...payload })], {type: 'text/plain'});
+    await fetch(S.scriptUrl, { method: 'POST', body: blob, mode: 'no-cors' });
+  } catch(e) { /* silent */ }
 }
 
 // ══════════════════════════════════════════════
@@ -1445,46 +1441,34 @@ const SCRIPT_CODE = `// ══════════════════�
 // ═══════════════════════════════════════════
 
 function doGet(e) {
-  if (!e || !e.parameter) {
-    return json({ error: 'Ejecuta desde la URL publicada.' });
-  }
-  const action = e.parameter.action;
+  if (!e || !e.parameter) return json({ error: 'Sin parámetros.' });
   const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const action = e.parameter.action;
   if (action === 'getData') {
-    const aceites = getSheetData(ss, 'Stock');
-    const historial = getSheetData(ss, 'Historial');
-    const cierres = getSheetData(ss, 'Cierres');
-    const vaciados = getSheetData(ss, 'Vaciados');
-    return json({ aceites, historial, cierres, vaciados });
+    return json({
+      aceites:   getSheetData(ss, 'Stock'),
+      historial: getSheetData(ss, 'Historial'),
+      cierres:   getSheetData(ss, 'Cierres'),
+      vaciados:  getSheetData(ss, 'Vaciados')
+    });
   }
   return json({ error: 'action not found' });
 }
 
 function doPost(e) {
-  if (!e || !e.postData) return json({ error: 'Sin datos.' });
-  
-  // Acepta tanto application/json como text/plain (fix CORS)
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
   let body;
   try {
     body = JSON.parse(e.postData.contents);
   } catch(err) {
-    return json({ error: 'JSON inválido: ' + err.message });
+    return json({ error: 'JSON invalido' });
   }
-  
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
   const action = body.action;
-
-  if (action === 'updateStock') {
-    writeSheet(ss, 'Stock', body.aceites);
-  } else if (action === 'addMovimiento') {
-    appendRow(ss, 'Historial', body.mov);
-  } else if (action === 'updateHistorial') {
-    writeSheet(ss, 'Historial', body.historial);
-  } else if (action === 'addCierre') {
-    appendRow(ss, 'Cierres', body.cierre);
-  } else if (action === 'addVaciado') {
-    appendRow(ss, 'Vaciados', body.vaciado);
-  }
+  if      (action === 'updateStock')     writeSheet(ss, 'Stock',     body.aceites);
+  else if (action === 'addMovimiento')   appendRow (ss, 'Historial', body.mov);
+  else if (action === 'updateHistorial') writeSheet(ss, 'Historial', body.historial);
+  else if (action === 'addCierre')       appendRow (ss, 'Cierres',   body.cierre);
+  else if (action === 'addVaciado')      appendRow (ss, 'Vaciados',  body.vaciado);
   return json({ ok: true });
 }
 
@@ -1541,7 +1525,7 @@ function copyScript() {
 // ══════════════════════════════════════════════
 window.addEventListener('load', () => {
   // URL fija del servidor — no requiere configuración
-  const FIXED_URL = 'https://script.google.com/macros/s/AKfycbyjAVQwRsCxxFDZ9hQXUt0-yVWhYVwjoyr-7qzTaMBAIckPwnXFwdvHSoUzFzTB8Aw_/exec';
+  const FIXED_URL = 'https://script.google.com/macros/s/AKfycbwLhYSxQFasUJSzJ1OTtv2KpldQnz9wYniThKdU8h8c3YvLPpTWCQJJDgTDgziUZtMq/exec';
   const url = FIXED_URL || localStorage.getItem('primax_url');
   if (url) {
     S.scriptUrl = url;
