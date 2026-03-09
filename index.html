@@ -675,10 +675,10 @@ body {
   <!-- AJUSTES TAB -->
   <div id="tab-ajustes" class="content" style="display:none">
     <div class="sett-sec">
-      <div class="sett-sec-title">Conexión</div>
+      <div class="sett-sec-title">Base de datos</div>
       <div class="sett-item" onclick="openConexionModal()">
-        <div class="sett-left"><span class="sett-ico">🔗</span>
-          <div><div class="sett-name">Google Sheets</div><div class="sett-desc" id="sett-conn-desc">Modo demo</div></div>
+        <div class="sett-left"><span class="sett-ico">🔥</span>
+          <div><div class="sett-name">Firebase</div><div class="sett-desc" id="sett-conn-desc">Sin conectar</div></div>
         </div><span class="sett-arrow">›</span>
       </div>
     </div>
@@ -689,12 +689,6 @@ body {
       </div>
       <div class="sett-item" onclick="exportCSV()">
         <div class="sett-left"><span class="sett-ico">📊</span><div><div class="sett-name">Exportar CSV</div><div class="sett-desc">Descargar historial completo</div></div></div><span class="sett-arrow">›</span>
-      </div>
-    </div>
-    <div class="sett-sec">
-      <div class="sett-sec-title">Código Apps Script</div>
-      <div class="sett-item" onclick="showScriptCode()">
-        <div class="sett-left"><span class="sett-ico">💻</span><div><div class="sett-name">Ver código del servidor</div><div class="sett-desc">Copiar para Google Apps Script</div></div></div><span class="sett-arrow">›</span>
       </div>
     </div>
   </div>
@@ -738,21 +732,10 @@ body {
   <div class="modal">
     <div class="modal-handle"></div>
     <div class="modal-title">🔥 Conexión Firebase</div>
-    <div class="modal-sub">URL del Apps Script de Google</div>
-    <div class="fg"><label class="fl">URL Web App</label><input class="fi" id="m-conn-url" type="url" placeholder="https://tu-proyecto-default-rtdb.firebaseio.com" value="https://script.google.com/macros/s/AKfycbwLhYSxQFasUJSzJ1OTtv2KpldQnz9wYniThKdU8h8c3YvLPpTWCQJJDgTDgziUZtMq/exec" style="font-size:12px;text-align:left;font-family:var(--mono)"></div>
+    <div class="modal-sub">URL de tu Realtime Database</div>
+    <div class="fg"><label class="fl">URL Firebase</label><input class="fi" id="m-conn-url" type="url" placeholder="https://tu-proyecto-default-rtdb.firebaseio.com" style="font-size:12px;text-align:left;font-family:var(--mono)"></div>
     <button class="btn-orange" onclick="saveConexion()">💾 Guardar</button>
     <button class="btn-ghost" onclick="closeModal('m-conexion')" style="margin-top:8px">Cancelar</button>
-  </div>
-</div>
-
-<!-- Script code modal -->
-<div class="modal-overlay" id="m-script" onclick="closeModal('m-script',event)">
-  <div class="modal">
-    <div class="modal-handle"></div>
-    <div class="modal-title">💻 Código Apps Script</div>
-    <div class="modal-sub">Copia este código en tu Google Apps Script</div>
-    <textarea class="fta" id="script-code-display" style="min-height:200px;font-family:var(--mono);font-size:11px;background:#1a1a2e;color:#f0f0f5;border-color:#333;border-radius:12px" readonly></textarea>
-    <button class="btn-blue" onclick="copyScript()" style="margin-top:12px">📋 Copiar código</button>
   </div>
 </div>
 
@@ -801,7 +784,6 @@ body {
 // ══════════════════════════════════════════════
 const S = {
   demo: true,
-  scriptUrl: '',
   aceites: [],       // {id, nombre, ref, qty, minimo, precio}
   historial: [],     // {id, tipo, producto, qty, precio, monto, nota, fecha, hora}
   cierres: [],       // {id, fecha, saldoAnterior, ventasDia, totalCaja, montoFisico, nota, productos}
@@ -851,7 +833,7 @@ function conectar() {
 function iniciarApp() {
   document.getElementById('setup').style.display = 'none';
   document.getElementById('app').style.display = 'flex';
-  document.getElementById('sett-conn-desc').textContent = S.demo ? 'Modo demo activo' : 'Firebase · ' + (FB_URL||'').replace('https://','').slice(0,30)+'...';
+  document.getElementById('sett-conn-desc').textContent = S.demo ? 'Modo demo activo' : (FB_URL ? FB_URL.replace('https://','').split('.')[0] : 'Sin conectar');
   renderAll();
 }
 
@@ -1524,18 +1506,19 @@ function closeModal(id, e) {
 }
 
 function openConexionModal() {
-  document.getElementById('m-conn-url').value = FB_URL;
+  document.getElementById('m-conn-url').value = FB_URL || '';
   document.getElementById('m-conexion').classList.add('open');
 }
 
 function saveConexion() {
   const url = document.getElementById('m-conn-url').value.trim();
-  if (!url.includes('script.google.com')) { toast('URL inválida','err'); return; }
-  FB_URL = url.replace(/\/$/,''); S.demo = false;
+  if (!url.includes('firebaseio.com')) { toast('Introduce una URL válida de Firebase (.firebaseio.com)','err'); return; }
+  FB_URL = url.trim().replace(/\/$/,''); S.demo = false;
   localStorage.setItem('primax_fb_url', FB_URL);
-  document.getElementById('sett-conn-desc').textContent = 'Firebase · ' + FB_URL.replace('https://','').slice(0,30)+'...';
+  document.getElementById('sett-conn-desc').textContent = FB_URL.replace('https://','').split('.')[0];
   closeModal('m-conexion');
   syncAll();
+  toast('🔥 Conectado a Firebase','ok');
   syncAll();
 }
 
@@ -1556,101 +1539,6 @@ function exportCSV() {
   toast('📊 CSV exportado','ok');
 }
 
-const SCRIPT_CODE = `// ═══════════════════════════════════════════
-// PRIMAX · Stock de Aceites — Apps Script
-// Pega este código en tu Google Apps Script
-// ═══════════════════════════════════════════
-
-// Todo por GET para evitar problemas de CORS
-function doGet(e) {
-  if (!e || !e.parameter) return json({ error: 'Sin parámetros.' });
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-
-  // ESCRITURA: ?write=1&d={json}
-  if (e.parameter.write === '1') {
-    try {
-      const body = JSON.parse(decodeURIComponent(e.parameter.d));
-      procesarEscritura(ss, body);
-      return json({ ok: true });
-    } catch(err) {
-      return json({ error: err.toString() });
-    }
-  }
-
-  // LECTURA: ?action=getData
-  if (e.parameter.action === 'getData') {
-    return json({
-      aceites:   getSheetData(ss, 'Stock'),
-      historial: getSheetData(ss, 'Historial'),
-      cierres:   getSheetData(ss, 'Cierres'),
-      vaciados:  getSheetData(ss, 'Vaciados')
-    });
-  }
-
-  return json({ error: 'action not found' });
-}
-
-function doPost(e) {
-  // Redirigir POST a doGet por compatibilidad
-  return doGet(e);
-}
-
-function procesarEscritura(ss, body) {
-  const action = body.action;
-  if      (action === 'updateStock')     writeSheet(ss, 'Stock',     body.aceites);
-  else if (action === 'addMovimiento')   appendRow (ss, 'Historial', body.mov);
-  else if (action === 'updateHistorial') writeSheet(ss, 'Historial', body.historial);
-  else if (action === 'addCierre')       appendRow (ss, 'Cierres',   body.cierre);
-  else if (action === 'addVaciado')      appendRow (ss, 'Vaciados',  body.vaciado);
-}
-
-function getSheetData(ss, name) {
-  const sheet = ss.getSheetByName(name);
-  if (!sheet) return [];
-  const rows = sheet.getDataRange().getValues();
-  if (rows.length < 2) return [];
-  const headers = rows[0];
-  return rows.slice(1).map(r => {
-    const obj = {};
-    headers.forEach((h, i) => obj[h] = r[i]);
-    return obj;
-  });
-}
-
-function writeSheet(ss, name, data) {
-  let sheet = ss.getSheetByName(name);
-  if (!sheet) sheet = ss.insertSheet(name);
-  sheet.clearContents();
-  if (!data || !data.length) return;
-  const headers = Object.keys(data[0]);
-  sheet.appendRow(headers);
-  data.forEach(row => sheet.appendRow(headers.map(h => String(row[h] ?? ''))));
-}
-
-function appendRow(ss, name, obj) {
-  let sheet = ss.getSheetByName(name);
-  if (!sheet) {
-    sheet = ss.insertSheet(name);
-    sheet.appendRow(Object.keys(obj));
-  }
-  if (sheet.getLastRow() === 0) sheet.appendRow(Object.keys(obj));
-  sheet.appendRow(Object.values(obj).map(v => String(v ?? '')));
-}
-
-function json(data) {
-  return ContentService
-    .createTextOutput(JSON.stringify(data))
-    .setMimeType(ContentService.MimeType.JSON);
-}`;
-
-function showScriptCode() {
-  document.getElementById('script-code-display').value = SCRIPT_CODE;
-  document.getElementById('m-script').classList.add('open');
-}
-
-function copyScript() {
-  navigator.clipboard.writeText(SCRIPT_CODE).then(()=>toast('📋 Código copiado','ok')).catch(()=>toast('Copia el texto manualmente','info'));
-}
 
 // ══════════════════════════════════════════════
 //  INIT
