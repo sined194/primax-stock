@@ -630,6 +630,10 @@ body {
           <div class="sett-left"><span class="sett-ico">📊</span><div><div class="sett-name">Exportar CSV</div><div class="sett-desc">Descargar historial completo</div></div></div>
           <span class="sett-arrow">›</span>
         </div>
+        <div class="sett-item" onclick="generarReportePDF()">
+          <div class="sett-left"><span class="sett-ico">📄</span><div><div class="sett-name">Reporte PDF</div><div class="sett-desc">Stock, caja e historial del día</div></div></div>
+          <span class="sett-arrow">›</span>
+        </div>
       </div>
     </div>
 
@@ -653,7 +657,7 @@ body {
 
 <!-- Añadir / Editar aceite -->
 <div class="modal-overlay" id="m-add-oil" onclick="closeModal('m-add-oil',event)">
-  <div class="modal">
+  <div class="modal" onclick="event.stopPropagation()">
     <div class="modal-handle"></div>
     <div class="modal-title" id="m-oil-title">Nuevo Aceite</div>
     <div class="modal-sub" id="m-oil-sub">Añadir al inventario</div>
@@ -670,7 +674,7 @@ body {
 
 <!-- Editar historial -->
 <div class="modal-overlay" id="m-edit-hist" onclick="closeModal('m-edit-hist',event)">
-  <div class="modal">
+  <div class="modal" onclick="event.stopPropagation()">
     <div class="modal-handle"></div>
     <div class="modal-title">✏️ Editar registro</div>
     <div class="modal-sub">Corregir un movimiento del historial</div>
@@ -684,7 +688,7 @@ body {
 
 <!-- Conexión Firebase -->
 <div class="modal-overlay" id="m-conexion" onclick="closeModal('m-conexion',event)">
-  <div class="modal">
+  <div class="modal" onclick="event.stopPropagation()">
     <div class="modal-handle"></div>
     <div class="modal-title">🔥 Conexión Firebase</div>
     <div class="modal-sub">URL de tu Realtime Database</div>
@@ -696,7 +700,7 @@ body {
 
 <!-- Entrada de stock -->
 <div class="modal-overlay" id="m-mov" onclick="closeModal('m-mov',event)">
-  <div class="modal">
+  <div class="modal" onclick="event.stopPropagation()">
     <div class="modal-handle"></div>
     <div class="modal-title" id="m-mov-title">📥 Entrada de Stock</div>
     <div class="modal-sub" id="m-mov-product"></div>
@@ -720,7 +724,7 @@ body {
 
 <!-- Vaciar caja -->
 <div class="modal-overlay" id="m-vaciar" onclick="closeModal('m-vaciar',event)">
-  <div class="modal" style="text-align:center">
+  <div class="modal" onclick="event.stopPropagation()" style="text-align:center">
     <div class="modal-handle"></div>
     <div style="font-size:48px;margin-bottom:12px">🗑️</div>
     <div class="modal-title" style="text-align:center">¿Vaciar la caja?</div>
@@ -1463,8 +1467,10 @@ function setHistFilter(f, el) {
 }
 
 function closeModal(id, e) {
+  // If called from overlay click, only close when clicking the backdrop itself
   if (e && e.target !== document.getElementById(id)) return;
-  document.getElementById(id).classList.remove('open');
+  const el = document.getElementById(id);
+  if (el) el.classList.remove('open');
 }
 
 function openConexionModal() {
@@ -1500,6 +1506,247 @@ function exportCSV() {
   toast('📊 CSV exportado','ok');
 }
 
+
+// ══════════════════════════════════════════════
+//  REPORTE PDF
+// ══════════════════════════════════════════════
+function generarReportePDF() {
+  const fecha = hoy();
+  const ultimoCierre = S.cierres.length ? S.cierres[S.cierres.length-1] : null;
+  const cierreId = ultimoCierre ? ultimoCierre.id : 0;
+  const ventasHoy = S.historial.filter(h => h.tipo==='venta' && h.id > cierreId);
+  const entradasHoy = S.historial.filter(h => h.tipo==='entrada' && h.id > cierreId);
+  const cajaActual = ultimoCierre ? ultimoCierre.totalCaja : 0;
+  const totalVentas = ventasHoy.reduce((s,h)=>s+h.monto,0);
+
+  // ── Rows helpers ──
+  const stockRows = S.aceites.map(a => {
+    const alerta = a.qty <= a.minimo ? '⚠️' : '';
+    return `<tr class="${a.qty<=a.minimo?'low':''}">
+      <td>${a.nombre}</td>
+      <td class="mono">${a.ref}</td>
+      <td class="num">${a.qty}</td>
+      <td class="num">${a.minimo}</td>
+      <td class="num">S/ ${Number(a.precio).toFixed(2)}</td>
+      <td class="center">${alerta}</td>
+    </tr>`;
+  }).join('');
+
+  const ventasRows = ventasHoy.length
+    ? ventasHoy.map(v=>`<tr>
+        <td>${v.fecha} ${v.hora}</td>
+        <td>${v.producto}</td>
+        <td class="num">${v.qty}</td>
+        <td class="num">S/ ${Number(v.precio).toFixed(2)}</td>
+        <td class="num bold">S/ ${Number(v.monto).toFixed(2)}</td>
+        <td>${v.nota||'—'}</td>
+      </tr>`).join('')
+    : `<tr><td colspan="6" class="center text2">Sin ventas en este período</td></tr>`;
+
+  const entradasRows = entradasHoy.length
+    ? entradasHoy.map(e=>`<tr>
+        <td>${e.fecha} ${e.hora}</td>
+        <td>${e.producto}</td>
+        <td class="num">+${e.qty}</td>
+        <td>${e.nota||'—'}</td>
+      </tr>`).join('')
+    : `<tr><td colspan="4" class="center text2">Sin entradas en este período</td></tr>`;
+
+  const cierresRows = S.cierres.length
+    ? [...S.cierres].reverse().slice(0,10).map(cr=>`<tr>
+        <td>${cr.fecha}</td>
+        <td class="num">S/ ${Number(cr.ventasDia).toFixed(2)}</td>
+        <td class="num">S/ ${Number(cr.saldoAnterior).toFixed(2)}</td>
+        <td class="num bold">S/ ${Number(cr.totalCaja).toFixed(2)}</td>
+        <td class="num">S/ ${Number(cr.montoFisico).toFixed(2)}</td>
+        <td>${cr.nota||'—'}</td>
+      </tr>`).join('')
+    : `<tr><td colspan="6" class="center text2">Sin cierres registrados</td></tr>`;
+
+  const html = `<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Reporte Primax – ${fecha}</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family: Arial, sans-serif; font-size: 12px; color: #1a1a2e; background:#fff; }
+  .page { padding: 28px 32px; max-width: 860px; margin: 0 auto; }
+
+  /* Header */
+  .rpt-header { display:flex; align-items:center; justify-content:space-between;
+    border-bottom: 3px solid #f47c20; padding-bottom: 14px; margin-bottom: 20px; }
+  .rpt-header h1 { font-size: 22px; color: #1a3a6b; font-weight: 800; }
+  .rpt-header .meta { text-align:right; color:#6b6b7b; font-size:11px; line-height:1.7; }
+  .rpt-header .badge-demo {
+    display:inline-block; background:#f47c20; color:#fff;
+    border-radius:6px; padding:2px 8px; font-size:10px; font-weight:700;
+    margin-top:4px;
+  }
+
+  /* Summary cards */
+  .summary { display:flex; gap:12px; margin-bottom:24px; }
+  .card { flex:1; border-radius:10px; padding:14px 16px; }
+  .card.blue  { background:#1a3a6b; color:#fff; }
+  .card.orange{ background:#f47c20; color:#fff; }
+  .card.green { background:#f0fdf4; border:1.5px solid #bbf7d0; color:#166534; }
+  .card.red   { background:#fef2f2; border:1.5px solid #fca5a5; color:#991b1b; }
+  .card .cl { font-size:10px; font-weight:700; text-transform:uppercase;
+    letter-spacing:.8px; opacity:.75; margin-bottom:5px; }
+  .card .cv { font-size:22px; font-weight:800; font-family:monospace; }
+
+  /* Sections */
+  .sec { margin-bottom: 28px; }
+  .sec h2 { font-size:14px; font-weight:700; color:#1a3a6b;
+    text-transform:uppercase; letter-spacing:.8px;
+    border-left:4px solid #f47c20; padding-left:10px; margin-bottom:12px; }
+
+  /* Tables */
+  table { width:100%; border-collapse:collapse; font-size:11px; }
+  th { background:#1a3a6b; color:#fff; padding:8px 10px; text-align:left;
+    font-weight:700; font-size:10px; text-transform:uppercase; letter-spacing:.5px; }
+  td { padding:7px 10px; border-bottom:1px solid #e2e0d8; }
+  tr:last-child td { border-bottom:none; }
+  tr:nth-child(even) td { background:#f5f4f0; }
+  tr.low td { background:#fef2f2 !important; }
+  .num    { text-align:right; font-family:monospace; }
+  .center { text-align:center; }
+  .bold   { font-weight:700; }
+  .mono   { font-family:monospace; font-size:10px; color:#6b6b7b; }
+  .text2  { color:#9999aa; font-style:italic; }
+
+  /* Footer */
+  .rpt-footer { margin-top:32px; padding-top:12px; border-top:1.5px solid #e2e0d8;
+    font-size:10px; color:#9999aa; text-align:center; }
+
+  @media print {
+    body { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+    .page { padding:16px 20px; }
+    .no-print { display:none; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- HEADER -->
+  <div class="rpt-header">
+    <div>
+      <h1>🛢️ PRIMAX · Reporte de Operaciones</h1>
+      <div style="font-size:13px;color:#6b6b7b;margin-top:4px;">Gestión de Aceites</div>
+      ${S.demo ? '<div class="badge-demo">MODO DEMO</div>' : ''}
+    </div>
+    <div class="meta">
+      Fecha: <strong>${fecha}</strong><br>
+      Generado: <strong>${new Date().toLocaleTimeString('es-PE',{hour:'2-digit',minute:'2-digit'})}</strong><br>
+      Período desde último cierre
+    </div>
+  </div>
+
+  <!-- SUMMARY -->
+  <div class="summary">
+    <div class="card blue">
+      <div class="cl">Caja actual</div>
+      <div class="cv">S/ ${Number(cajaActual).toFixed(2)}</div>
+    </div>
+    <div class="card orange">
+      <div class="cl">Ventas período</div>
+      <div class="cv">S/ ${Number(totalVentas).toFixed(2)}</div>
+    </div>
+    <div class="card green">
+      <div class="cl">Total proyectado</div>
+      <div class="cv">S/ ${Number(cajaActual+totalVentas).toFixed(2)}</div>
+    </div>
+    <div class="card red">
+      <div class="cl">Stock bajo</div>
+      <div class="cv">${S.aceites.filter(a=>a.qty<=a.minimo).length} productos</div>
+    </div>
+  </div>
+
+  <!-- STOCK -->
+  <div class="sec">
+    <h2>📦 Inventario actual (${S.aceites.length} productos)</h2>
+    <table>
+      <thead><tr>
+        <th>Producto</th><th>Ref.</th>
+        <th style="text-align:right">Stock</th>
+        <th style="text-align:right">Mínimo</th>
+        <th style="text-align:right">Precio</th>
+        <th style="text-align:center">Estado</th>
+      </tr></thead>
+      <tbody>${stockRows || '<tr><td colspan="6" class="center text2">Sin productos</td></tr>'}</tbody>
+    </table>
+  </div>
+
+  <!-- VENTAS -->
+  <div class="sec">
+    <h2>💰 Ventas del período (${ventasHoy.length})</h2>
+    <table>
+      <thead><tr>
+        <th>Fecha / Hora</th><th>Producto</th>
+        <th style="text-align:right">Cant.</th>
+        <th style="text-align:right">Precio</th>
+        <th style="text-align:right">Monto</th>
+        <th>Nota</th>
+      </tr></thead>
+      <tbody>${ventasRows}</tbody>
+    </table>
+    ${ventasHoy.length ? `
+    <div style="text-align:right;margin-top:8px;font-size:12px;font-weight:700;color:#f47c20;">
+      Total: S/ ${Number(totalVentas).toFixed(2)} · ${ventasHoy.length} venta(s)
+    </div>` : ''}
+  </div>
+
+  <!-- ENTRADAS -->
+  <div class="sec">
+    <h2>📥 Entradas del período (${entradasHoy.length})</h2>
+    <table>
+      <thead><tr>
+        <th>Fecha / Hora</th><th>Producto</th>
+        <th style="text-align:right">Cantidad</th>
+        <th>Nota</th>
+      </tr></thead>
+      <tbody>${entradasRows}</tbody>
+    </table>
+  </div>
+
+  <!-- CIERRES -->
+  <div class="sec">
+    <h2>🔒 Últimos cierres de caja</h2>
+    <table>
+      <thead><tr>
+        <th>Fecha</th>
+        <th style="text-align:right">Ventas día</th>
+        <th style="text-align:right">Saldo anterior</th>
+        <th style="text-align:right">Total caja</th>
+        <th style="text-align:right">Monto físico</th>
+        <th>Nota</th>
+      </tr></thead>
+      <tbody>${cierresRows}</tbody>
+    </table>
+  </div>
+
+  <!-- FOOTER -->
+  <div class="rpt-footer">
+    Reporte generado por Primax · Gestión de Aceites · ${fecha} ${new Date().toLocaleTimeString('es-PE')}
+  </div>
+
+</div>
+<script>window.print();<\/script>
+</body>
+</html>`;
+
+  const blob = new Blob([html], {type:'text/html;charset=utf-8'});
+  const url  = URL.createObjectURL(blob);
+  const win  = window.open(url, '_blank');
+  if (!win) {
+    // Fallback: download the HTML as print file
+    const a = document.createElement('a');
+    a.href = url; a.download = `reporte-primax-${fecha.replace(/\//g,'-')}.html`;
+    a.click();
+  }
+  toast('📄 Reporte generado','ok');
+}
 
 // ══════════════════════════════════════════════
 //  INIT
