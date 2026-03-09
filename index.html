@@ -910,16 +910,18 @@ function sanitizeMov(h)     { return {...h, id:Number(h.id), qty:Number(h.qty)||
 function sanitizeCierre(cr) { return {...cr, id:Number(cr.id), saldoAnterior:Number(cr.saldoAnterior)||0, ventasDia:Number(cr.ventasDia)||0, totalCaja:Number(cr.totalCaja)||0, montoFisico:Number(cr.montoFisico)||0, fecha:normalizeFecha(cr.fecha), productos:parseProductos(cr.productos)}; }
 function sanitizeVaciado(v) { return {...v, id:Number(v.id), monto:Number(v.monto)||0, fecha:normalizeFecha(v.fecha)}; }
 
-// ── PUSH: guardar en Sheets inmediatamente + guardar local
+// ── PUSH: guardar en Sheets via GET (evita CORS) + guardar local
 async function pushData(type, payload) {
   if (S.demo) return;
-  // 1. Guardar local primero — nunca se pierde nada
+  // 1. Guardar local primero
   saveLocal();
-  // 2. Enviar a Sheets en background sin bloquear la UI
+  // 2. Enviar a Sheets via GET con datos en URL
   try {
-    const blob = new Blob([JSON.stringify({action:type, ...payload})], {type:'text/plain'});
-    fetch(S.scriptUrl, {method:'POST', body:blob, mode:'no-cors'});
-  } catch(e) { /* silent */ }
+    const json = JSON.stringify({action:type, ...payload});
+    const encoded = encodeURIComponent(json);
+    const url = S.scriptUrl + '?write=1&d=' + encoded;
+    fetch(url, {redirect:'follow'}).catch(()=>{});
+  } catch(e) {}
 }
 
 // ── LOCAL CACHE
@@ -1504,11 +1506,24 @@ const SCRIPT_CODE = `// ══════════════════�
 // Pega este código en tu Google Apps Script
 // ═══════════════════════════════════════════
 
+// Todo por GET para evitar problemas de CORS
 function doGet(e) {
   if (!e || !e.parameter) return json({ error: 'Sin parámetros.' });
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const action = e.parameter.action;
-  if (action === 'getData') {
+
+  // ESCRITURA: ?write=1&d={json}
+  if (e.parameter.write === '1') {
+    try {
+      const body = JSON.parse(decodeURIComponent(e.parameter.d));
+      procesarEscritura(ss, body);
+      return json({ ok: true });
+    } catch(err) {
+      return json({ error: err.toString() });
+    }
+  }
+
+  // LECTURA: ?action=getData
+  if (e.parameter.action === 'getData') {
     return json({
       aceites:   getSheetData(ss, 'Stock'),
       historial: getSheetData(ss, 'Historial'),
@@ -1516,28 +1531,26 @@ function doGet(e) {
       vaciados:  getSheetData(ss, 'Vaciados')
     });
   }
+
   return json({ error: 'action not found' });
 }
 
 function doPost(e) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  let body;
-  try {
-    body = JSON.parse(e.postData.contents);
-  } catch(err) {
-    return json({ error: 'JSON invalido' });
-  }
+  // Redirigir POST a doGet por compatibilidad
+  return doGet(e);
+}
+
+function procesarEscritura(ss, body) {
   const action = body.action;
   if      (action === 'updateStock')     writeSheet(ss, 'Stock',     body.aceites);
   else if (action === 'addMovimiento')   appendRow (ss, 'Historial', body.mov);
   else if (action === 'updateHistorial') writeSheet(ss, 'Historial', body.historial);
   else if (action === 'addCierre')       appendRow (ss, 'Cierres',   body.cierre);
   else if (action === 'addVaciado')      appendRow (ss, 'Vaciados',  body.vaciado);
-  return json({ ok: true });
 }
 
 function getSheetData(ss, name) {
-  let sheet = ss.getSheetByName(name);
+  const sheet = ss.getSheetByName(name);
   if (!sheet) return [];
   const rows = sheet.getDataRange().getValues();
   if (rows.length < 2) return [];
@@ -1556,7 +1569,7 @@ function writeSheet(ss, name, data) {
   if (!data || !data.length) return;
   const headers = Object.keys(data[0]);
   sheet.appendRow(headers);
-  data.forEach(row => sheet.appendRow(headers.map(h => row[h] || '')));
+  data.forEach(row => sheet.appendRow(headers.map(h => String(row[h] ?? ''))));
 }
 
 function appendRow(ss, name, obj) {
@@ -1566,7 +1579,7 @@ function appendRow(ss, name, obj) {
     sheet.appendRow(Object.keys(obj));
   }
   if (sheet.getLastRow() === 0) sheet.appendRow(Object.keys(obj));
-  sheet.appendRow(Object.values(obj));
+  sheet.appendRow(Object.values(obj).map(v => String(v ?? '')));
 }
 
 function json(data) {
