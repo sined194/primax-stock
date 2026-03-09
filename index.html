@@ -879,95 +879,68 @@ function parseProductos(p) {
   } catch(e) { return []; }
 }
 
+// ── SYNC: leer desde Sheets (solo al abrir)
 async function syncAll() {
-  if (S.demo) { toast('Modo demo: sin conexión','info'); return; }
+  if (S.demo) { toast('Modo demo','info'); return; }
   const pill = document.getElementById('sync-pill');
-  const txt = document.getElementById('sync-txt');
+  const txt  = document.getElementById('sync-txt');
   pill.className = 'sync-pill'; txt.textContent = '⏳';
-
-  // First flush any pending writes
-  await flushQueue();
-
   try {
-    const res = await fetch(S.scriptUrl + '?action=getData', { redirect:'follow' });
+    const res  = await fetch(S.scriptUrl + '?action=getData', { redirect:'follow' });
     const data = await res.json();
-
-    if (Array.isArray(data.aceites)) S.aceites = data.aceites.map(a => ({
-      ...a, id:Number(a.id), qty:Number(a.qty)||0, minimo:Number(a.minimo)||0, precio:Number(a.precio)||0
-    }));
-    if (Array.isArray(data.historial)) S.historial = data.historial.map(h => ({
-      ...h, id:Number(h.id), qty:Number(h.qty)||0, precio:Number(h.precio)||0, monto:Number(h.monto)||0, fecha:normalizeFecha(h.fecha)
-    }));
-    if (Array.isArray(data.cierres)) S.cierres = data.cierres.map(cr => ({
-      ...cr, id:Number(cr.id), saldoAnterior:Number(cr.saldoAnterior)||0, ventasDia:Number(cr.ventasDia)||0,
-      totalCaja:Number(cr.totalCaja)||0, montoFisico:Number(cr.montoFisico)||0,
-      fecha:normalizeFecha(cr.fecha), productos:parseProductos(cr.productos)
-    }));
-    if (Array.isArray(data.vaciados)) S.vaciados = (data.vaciados||[]).map(v => ({
-      ...v, id:Number(v.id), monto:Number(v.monto)||0, fecha:normalizeFecha(v.fecha)
-    }));
-
-    // Save synced data locally
+    applySheetData(data);
     saveLocal();
     pill.className = 'sync-pill ok'; txt.textContent = '✓ Sync';
     renderAll();
-    setTimeout(()=>{ pill.className='sync-pill'; txt.textContent='Sync'; }, 3000);
+    setTimeout(()=>{ pill.className='sync-pill'; txt.textContent='☁️'; }, 3000);
   } catch(e) {
-    // On error: load from local cache silently — app keeps working
-    // Silent failure — app keeps working with local data
     pill.className = 'sync-pill'; txt.textContent = '☁️';
-    loadLocal();
-    renderAll();
   }
 }
 
-// Save state locally immediately, queue sync in background
-function pushData(type, payload) {
-  if (S.demo) return;
-  // Always save full state to localStorage first (never lose data)
-  saveLocal();
-  // Add to pending queue
-  const queue = JSON.parse(localStorage.getItem('primax_queue') || '[]');
-  queue.push({ type, payload, ts: Date.now() });
-  localStorage.setItem('primax_queue', JSON.stringify(queue));
+function applySheetData(data) {
+  if (Array.isArray(data.aceites))   S.aceites   = data.aceites.map(sanitizeAceite);
+  if (Array.isArray(data.historial)) S.historial = data.historial.map(sanitizeMov);
+  if (Array.isArray(data.cierres))   S.cierres   = data.cierres.map(sanitizeCierre);
+  if (Array.isArray(data.vaciados))  S.vaciados  = data.vaciados.map(sanitizeVaciado);
 }
 
+function sanitizeAceite(a)  { return {...a, id:Number(a.id), qty:Number(a.qty)||0, minimo:Number(a.minimo)||0, precio:Number(a.precio)||0}; }
+function sanitizeMov(h)     { return {...h, id:Number(h.id), qty:Number(h.qty)||0, precio:Number(h.precio)||0, monto:Number(h.monto)||0, fecha:normalizeFecha(h.fecha)}; }
+function sanitizeCierre(cr) { return {...cr, id:Number(cr.id), saldoAnterior:Number(cr.saldoAnterior)||0, ventasDia:Number(cr.ventasDia)||0, totalCaja:Number(cr.totalCaja)||0, montoFisico:Number(cr.montoFisico)||0, fecha:normalizeFecha(cr.fecha), productos:parseProductos(cr.productos)}; }
+function sanitizeVaciado(v) { return {...v, id:Number(v.id), monto:Number(v.monto)||0, fecha:normalizeFecha(v.fecha)}; }
+
+// ── PUSH: guardar en Sheets inmediatamente + guardar local
+async function pushData(type, payload) {
+  if (S.demo) return;
+  // 1. Guardar local primero — nunca se pierde nada
+  saveLocal();
+  // 2. Enviar a Sheets en background sin bloquear la UI
+  try {
+    const blob = new Blob([JSON.stringify({action:type, ...payload})], {type:'text/plain'});
+    fetch(S.scriptUrl, {method:'POST', body:blob, mode:'no-cors'});
+  } catch(e) { /* silent */ }
+}
+
+// ── LOCAL CACHE
 function saveLocal() {
-  localStorage.setItem('primax_data', JSON.stringify({
-    aceites: S.aceites,
-    historial: S.historial,
-    cierres: S.cierres,
-    vaciados: S.vaciados
-  }));
+  try {
+    localStorage.setItem('primax_data', JSON.stringify({
+      aceites:S.aceites, historial:S.historial, cierres:S.cierres, vaciados:S.vaciados
+    }));
+  } catch(e) {}
 }
 
 function loadLocal() {
-  const saved = localStorage.getItem('primax_data');
-  if (!saved) return false;
   try {
-    const data = JSON.parse(saved);
-    if (data.aceites)   S.aceites   = data.aceites;
-    if (data.historial) S.historial = data.historial;
-    if (data.cierres)   S.cierres   = data.cierres;
-    if (data.vaciados)  S.vaciados  = data.vaciados || [];
+    const d = JSON.parse(localStorage.getItem('primax_data') || 'null');
+    if (!d) return false;
+    if (d.aceites)   S.aceites   = d.aceites;
+    if (d.historial) S.historial = d.historial;
+    if (d.cierres)   S.cierres   = d.cierres;
+    if (d.vaciados)  S.vaciados  = d.vaciados || [];
     return true;
   } catch(e) { return false; }
-}
-
-async function flushQueue() {
-  if (S.demo) return;
-  const queue = JSON.parse(localStorage.getItem('primax_queue') || '[]');
-  if (!queue.length) return;
-  const failed = [];
-  for (const item of queue) {
-    try {
-      const blob = new Blob([JSON.stringify({ action: item.type, ...item.payload })], {type:'text/plain'});
-      await fetch(S.scriptUrl, { method:'POST', body:blob, mode:'no-cors' });
-    } catch(e) {
-      failed.push(item); // keep failed items for next retry
-    }
-  }
-  localStorage.setItem('primax_queue', JSON.stringify(failed));
 }
 
 // ══════════════════════════════════════════════
@@ -1622,16 +1595,12 @@ window.addEventListener('load', () => {
     S.demo = false;
     localStorage.setItem('primax_url', url);
 
-    // Show app instantly from local cache — zero wait
+    // Carga local instantánea — la app funciona sin esperar red
     loadLocal();
     iniciarApp();
     renderAll();
-
-    // Sync with Sheets quietly in background after 2 seconds
-    setTimeout(() => syncAll(), 2000);
-
-    // Auto-sync every 90 seconds silently
-    setInterval(() => syncAll(), 90000);
+    // Sincroniza con Sheets al fondo una sola vez al abrir
+    syncAll();
   }
 });
 </script>
